@@ -1,7 +1,7 @@
 //go:build integration
 // +build integration
 
-package postgresql
+package pgsql
 
 import (
 	"context"
@@ -67,7 +67,6 @@ func enrollTestDevice(storage *PgSQLStorage) error {
 	if err != nil {
 		return err
 	}
-	//fmt.Println(*authMsg)
 	err = storage.StoreAuthenticate(newMdmReq(), authMsg)
 	if err != nil {
 		return err
@@ -88,7 +87,7 @@ func TestQueue(t *testing.T) {
 		t.Fatal("PostgreSQL DSN flag not provided to test")
 	}
 
-	storage, err := New(WithDSN(*flDSN))
+	storage, err := New(WithDSN(*flDSN), WithDeleteCommands())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,5 +97,16 @@ func TestQueue(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	test.TestQueue(t, deviceUDID, storage)
+	t.Run("WithDeleteCommands()", func(t *testing.T) {
+		test.TestQueue(t, deviceUDID, storage)
+	})
+
+	storage, err = New(WithDSN(*flDSN))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("normal", func(t *testing.T) {
+		test.TestQueue(t, deviceUDID, storage)
+	})
 }

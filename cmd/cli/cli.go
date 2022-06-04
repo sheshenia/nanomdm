@@ -11,7 +11,7 @@ import (
 	"github.com/micromdm/nanomdm/storage/allmulti"
 	"github.com/micromdm/nanomdm/storage/file"
 	"github.com/micromdm/nanomdm/storage/mysql"
-	"github.com/micromdm/nanomdm/storage/postgresql"
+	"github.com/micromdm/nanomdm/storage/pgsql"
 
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/lib/pq"
@@ -74,12 +74,12 @@ func (s *Storage) Parse(logger log.Logger) (storage.AllStorage, error) {
 				return nil, err
 			}
 			mdmStorage = append(mdmStorage, mysqlStorage)
-		case "postgresql":
-			postgresqlStorage, err := postgresqlStorageConfig(dsn, options, logger)
+		case "pgsql":
+			pgsqlStorage, err := pgsqlStorageConfig(dsn, options, logger)
 			if err != nil {
 				return nil, err
 			}
-			mdmStorage = append(mdmStorage, postgresqlStorage)
+			mdmStorage = append(mdmStorage, pgsqlStorage)
 		default:
 			return nil, fmt.Errorf("unknown storage: %s", storage)
 		}
@@ -117,13 +117,42 @@ func mysqlStorageConfig(dsn, options string, logger log.Logger) (*mysql.MySQLSto
 	return mysql.New(opts...)
 }
 
-func postgresqlStorageConfig(dsn, options string, logger log.Logger) (*postgresql.PgSQLStorage, error) {
+func pgsqlStorageConfig(dsn, options string, logger log.Logger) (*pgsql.PgSQLStorage, error) {
 	if options != "" {
 		return nil, NoStorageOptions
 	}
-	opts := []postgresql.Option{
-		postgresql.WithDSN(dsn),
-		postgresql.WithLogger(logger.With("storage", "postgresql")),
+	logger = logger.With("storage", "pgsql")
+	opts := []pgsql.Option{
+		pgsql.WithDSN(dsn),
+		pgsql.WithLogger(logger),
 	}
-	return postgresql.New(opts...)
+	if options != "" {
+		for k, v := range splitOptions(options) {
+			switch k {
+			case "delete":
+				if v == "1" {
+					opts = append(opts, pgsql.WithDeleteCommands())
+					logger.Debug("msg", "deleting commands")
+				} else if v != "0" {
+					return nil, fmt.Errorf("invalid value for delete option: %q", v)
+				}
+			default:
+				return nil, fmt.Errorf("invalid option: %q", k)
+			}
+		}
+	}
+	return pgsql.New(opts...)
+}
+
+func splitOptions(s string) map[string]string {
+	out := make(map[string]string)
+	opts := strings.Split(s, ",")
+	for _, opt := range opts {
+		optKAndV := strings.SplitN(opt, "=", 2)
+		if len(optKAndV) < 2 {
+			optKAndV = append(optKAndV, "")
+		}
+		out[optKAndV[0]] = optKAndV[1]
+	}
+	return out
 }

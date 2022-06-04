@@ -1,5 +1,5 @@
-// Package postgresql stores and retrieves MDM data from SQL
-package postgresql
+// Package pgsql stores and retrieves MDM data from SQL
+package pgsql
 
 import (
 	"context"
@@ -18,6 +18,7 @@ var ErrNoCert = errors.New("no certificate in MDM Request")
 type PgSQLStorage struct {
 	logger log.Logger
 	db     *sql.DB
+	rm     bool
 }
 
 type config struct {
@@ -25,6 +26,7 @@ type config struct {
 	dsn    string
 	db     *sql.DB
 	logger log.Logger
+	rm     bool
 }
 
 type Option func(*config)
@@ -53,6 +55,12 @@ func WithDB(db *sql.DB) Option {
 	}
 }
 
+func WithDeleteCommands() Option {
+	return func(c *config) {
+		c.rm = true
+	}
+}
+
 func New(opts ...Option) (*PgSQLStorage, error) {
 	cfg := &config{logger: log.NopLogger, driver: "postgres"}
 	for _, opt := range opts {
@@ -68,7 +76,7 @@ func New(opts ...Option) (*PgSQLStorage, error) {
 	if err = cfg.db.Ping(); err != nil {
 		return nil, err
 	}
-	return &PgSQLStorage{db: cfg.db, logger: cfg.logger}, nil
+	return &PgSQLStorage{db: cfg.db, logger: cfg.logger, rm: cfg.rm}, nil
 }
 
 // nullEmptyString returns a NULL string if s is empty.
@@ -84,20 +92,6 @@ func (s *PgSQLStorage) StoreAuthenticate(r *mdm.Request, msg *mdm.Authenticate) 
 	if r.Certificate != nil {
 		pemCert = cryptoutil.PEMCertificate(r.Certificate.Raw)
 	}
-	/*	_, err := s.db.ExecContext(
-				r.Context, `
-		INSERT INTO devices
-		    (id, identity_cert, serial_number, authenticate, authenticate_at)
-		VALUES
-		    ($1, $2, $3, $4, CURRENT_TIMESTAMP)
-		ON CONFLICT ON CONSTRAINT devices_pkey DO
-		UPDATE SET
-		    identity_cert = EXCLUDED.identity_cert,
-		    serial_number = EXCLUDED.serial_number,
-		    authenticate = EXCLUDED.authenticate,
-		    authenticate_at = CURRENT_TIMESTAMP;`,
-				r.ID, pemCert, nullEmptyString(msg.SerialNumber), msg.Raw,
-			)*/
 	_, err := s.db.ExecContext(
 		r.Context, `
 INSERT INTO devices
@@ -110,7 +104,7 @@ UPDATE SET
     serial_number = EXCLUDED.serial_number,
     authenticate = EXCLUDED.authenticate,
     authenticate_at = CURRENT_TIMESTAMP;`,
-		r.ID, pemCert, nullEmptyString(msg.SerialNumber), msg.Raw,
+		r.ID, nullEmptyString(string(pemCert)) /*sql.NullString{string(pemCert), len(pemCert) > 0}*/, nullEmptyString(msg.SerialNumber), msg.Raw,
 	)
 	return err
 }

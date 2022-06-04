@@ -1,10 +1,13 @@
-package postgresql
+package pgsql
 
 import (
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
+
 	"github.com/micromdm/nanomdm/mdm"
 )
 
@@ -20,18 +23,30 @@ func enqueue(ctx context.Context, tx *sql.Tx, ids []string, cmd *mdm.Command) er
 	if err != nil {
 		return err
 	}
-	query := `INSERT INTO enrollment_queue (id, command_uuid) VALUES `
+
+	var query strings.Builder
+
+	query.WriteString(`INSERT INTO enrollment_queue (id, command_uuid) VALUES `)
 	args := make([]interface{}, len(ids)*2)
 	for i, id := range ids {
 		if i > 0 {
-			query += ","
+			query.WriteString(",")
 		}
 		ind := i * 2
-		query += fmt.Sprintf("($%d, $%d)", ind+1, ind+2)
+
+		//previous: query += fmt.Sprintf("($%d, $%d)", ind+1, ind+2)
+		query.WriteString("($")
+		query.WriteString(strconv.Itoa(ind + 1))
+		query.WriteString(", $")
+		query.WriteString(strconv.Itoa(ind + 2))
+		query.WriteString(")")
+
 		args[ind] = id
 		args[ind+1] = cmd.CommandUUID
 	}
-	_, err = tx.ExecContext(ctx, query+";", args...)
+	query.WriteString(";")
+
+	_, err = tx.ExecContext(ctx, query.String(), args...)
 	return err
 }
 
@@ -49,6 +64,60 @@ func (s *PgSQLStorage) EnqueueCommand(ctx context.Context, ids []string, cmd *md
 	return nil, tx.Commit()
 }
 
+func (s *PgSQLStorage) deleteCommand(ctx context.Context, tx *sql.Tx, id, uuid string) error {
+	// delete command result (i.e. NotNows) and this queued command
+	_, err := tx.ExecContext(
+		ctx, `
+DELETE
+    q, r
+FROM
+    enrollment_queue AS q
+    LEFT JOIN command_results AS r
+        ON q.command_uuid = r.command_uuid AND r.id = q.id
+WHERE
+    q.id = $1 AND q.command_uuid = $2;
+`,
+		id, uuid,
+	)
+	if err != nil {
+		return err
+	}
+	// now delete the actual command if no enrollments have it queued
+	// nor are there any results for it.
+	_, err = tx.ExecContext(
+		ctx, `
+DELETE
+    c
+FROM
+    commands AS c
+    LEFT JOIN enrollment_queue AS q
+        ON q.command_uuid = c.command_uuid
+    LEFT JOIN command_results AS r
+        ON r.command_uuid = c.command_uuid
+WHERE
+    c.command_uuid = $1 AND
+    q.command_uuid IS NULL AND
+    r.command_uuid IS NULL;
+`,
+		uuid,
+	)
+	return err
+}
+
+func (s *PgSQLStorage) deleteCommandTx(r *mdm.Request, result *mdm.CommandResults) error {
+	tx, err := s.db.BeginTx(r.Context, nil)
+	if err != nil {
+		return err
+	}
+	if err = s.deleteCommand(r.Context, tx, r.ID, result.CommandUUID); err != nil {
+		if rbErr := tx.Rollback(); rbErr != nil {
+			return fmt.Errorf("rollback error: %w; while trying to handle error: %v", rbErr, err)
+		}
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *PgSQLStorage) StoreCommandReport(r *mdm.Request, result *mdm.CommandResults) error {
 	if err := s.updateLastSeen(r); err != nil {
 		return err
@@ -56,9 +125,12 @@ func (s *PgSQLStorage) StoreCommandReport(r *mdm.Request, result *mdm.CommandRes
 	if result.Status == "Idle" {
 		return nil
 	}
+	if s.rm && result.Status != "NotNow" {
+		return s.deleteCommandTx(r, result)
+	}
 	notNowConstants := "NULL, 0"
 	notNowBumpTallySQL := ""
-	// note that due to the ON DUPLICATE KEY we don't UPDATE the
+	// note that due to the "ON CONFLICT ON CONSTRAINT command_results_pkey" we don't UPDATE the
 	// not_now_at field. thus it will only represent the first NotNow.
 	if result.Status == "NotNow" {
 		notNowConstants = "CURRENT_TIMESTAMP, 1"
@@ -113,21 +185,20 @@ func (s *PgSQLStorage) ClearQueue(r *mdm.Request) error {
 	_, err := s.db.ExecContext(
 		r.Context,
 		`
-UPDATE enrollment_queue
-SET    enrollment_queue.active = FALSE
-WHERE  enrollment_queue.id IN 
-	(SELECT q.id FROM enrollment_queue AS q
-		INNER JOIN enrollments AS e
-			ON q.id = e.id
-		INNER JOIN commands AS c
-			ON q.command_uuid = c.command_uuid
-		LEFT JOIN command_results r
-			ON r.command_uuid = q.command_uuid AND r.id = q.id
-		WHERE 
-			e.device_id = $1 AND
-			active = TRUE AND
-			(r.status IS NULL OR r.status = 'NotNow'))
-;`,
+UPDATE
+    enrollment_queue AS q
+	INNER JOIN enrollments AS e
+	    ON q.id = e.id
+    INNER JOIN commands AS c
+        ON q.command_uuid = c.command_uuid
+    LEFT JOIN command_results r
+        ON r.command_uuid = q.command_uuid AND r.id = q.id
+SET
+    q.active = FALSE
+WHERE
+    e.device_id = $1 AND
+    active = TRUE AND
+    (r.status IS NULL OR r.status = 'NotNow');`,
 		r.ID)
 	return err
 }
