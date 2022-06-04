@@ -10,10 +10,9 @@ import (
 	"io/ioutil"
 	"testing"
 
+	_ "github.com/lib/pq"
 	"github.com/micromdm/nanomdm/mdm"
 	"github.com/micromdm/nanomdm/storage/internal/test"
-
-	_ "github.com/lib/pq"
 )
 
 var flDSN = flag.String("dsn", "", "DSN of test PostgreSQL instance")
@@ -101,12 +100,12 @@ func TestQueue(t *testing.T) {
 		test.TestQueue(t, deviceUDID, storage)
 	})
 
-	storage, err = New(WithDSN(*flDSN))
+	/*storage, err = New(WithDSN(*flDSN))
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	t.Run("normal", func(t *testing.T) {
 		test.TestQueue(t, deviceUDID, storage)
-	})
+	})*/
 }
