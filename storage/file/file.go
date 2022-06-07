@@ -11,6 +11,7 @@ import (
 
 	"github.com/micromdm/nanomdm/cryptoutil"
 	"github.com/micromdm/nanomdm/mdm"
+	"github.com/micromdm/nanomdm/storage"
 )
 
 const (
@@ -40,6 +41,9 @@ const (
 type FileStorage struct {
 	path string
 }
+
+// Verify FileStorage interface compliance at compile time
+var _ storage.AllStorage = (*FileStorage)(nil)
 
 // New creates a new FileStorage backend
 func New(path string) (*FileStorage, error) {

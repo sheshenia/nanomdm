@@ -17,6 +17,9 @@ type MultiAllStorage struct {
 	stores []storage.AllStorage
 }
 
+// Verify MultiAllStorage interface compliance at compile time
+var _ storage.AllStorage = (*MultiAllStorage)(nil)
+
 // New creates a new MultiAllStorage dispatcher.
 func New(logger log.Logger, stores ...storage.AllStorage) *MultiAllStorage {
 	if len(stores) < 1 {

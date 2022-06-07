@@ -2,13 +2,14 @@ package mysql
 
 import (
 	"github.com/micromdm/nanomdm/mdm"
+	"github.com/micromdm/nanomdm/storage/gensql"
 )
 
 func (s *MySQLStorage) StoreBootstrapToken(r *mdm.Request, msg *mdm.SetBootstrapToken) error {
 	_, err := s.db.ExecContext(
 		r.Context,
 		`UPDATE devices SET bootstrap_token_b64 = ?, bootstrap_token_at = CURRENT_TIMESTAMP WHERE id = ? LIMIT 1;`,
-		nullEmptyString(msg.BootstrapToken.BootstrapToken.String()),
+		gensql.NullEmptyString(msg.BootstrapToken.BootstrapToken.String()),
 		r.ID,
 	)
 	if err != nil {

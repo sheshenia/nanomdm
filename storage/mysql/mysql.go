@@ -11,9 +11,9 @@ import (
 	"github.com/micromdm/nanomdm/log"
 	"github.com/micromdm/nanomdm/log/ctxlog"
 	"github.com/micromdm/nanomdm/mdm"
+	"github.com/micromdm/nanomdm/storage"
+	"github.com/micromdm/nanomdm/storage/gensql"
 )
-
-var ErrNoCert = errors.New("no certificate in MDM Request")
 
 type MySQLStorage struct {
 	logger log.Logger
@@ -21,70 +21,16 @@ type MySQLStorage struct {
 	rm     bool
 }
 
-type config struct {
-	driver string
-	dsn    string
-	db     *sql.DB
-	logger log.Logger
-	rm     bool
-}
+// Verify MySQLStorage interface compliance at compile time
+var _ storage.AllStorage = (*MySQLStorage)(nil)
 
-type Option func(*config)
-
-func WithLogger(logger log.Logger) Option {
-	return func(c *config) {
-		c.logger = logger
-	}
-}
-
-func WithDSN(dsn string) Option {
-	return func(c *config) {
-		c.dsn = dsn
-	}
-}
-
-func WithDriver(driver string) Option {
-	return func(c *config) {
-		c.driver = driver
-	}
-}
-
-func WithDB(db *sql.DB) Option {
-	return func(c *config) {
-		c.db = db
-	}
-}
-
-func WithDeleteCommands() Option {
-	return func(c *config) {
-		c.rm = true
-	}
-}
-
-func New(opts ...Option) (*MySQLStorage, error) {
-	cfg := &config{logger: log.NopLogger, driver: "mysql"}
-	for _, opt := range opts {
-		opt(cfg)
-	}
-	var err error
-	if cfg.db == nil {
-		cfg.db, err = sql.Open(cfg.driver, cfg.dsn)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if err = cfg.db.Ping(); err != nil {
+func New(opts ...gensql.Option) (*MySQLStorage, error) {
+	opts = append(opts, gensql.WithDriver(gensql.MysqlDriver))
+	cfg, err := gensql.NewDB(opts)
+	if err != nil {
 		return nil, err
 	}
-	return &MySQLStorage{db: cfg.db, logger: cfg.logger, rm: cfg.rm}, nil
-}
-
-// nullEmptyString returns a NULL string if s is empty.
-func nullEmptyString(s string) sql.NullString {
-	return sql.NullString{
-		String: s,
-		Valid:  s != "",
-	}
+	return &MySQLStorage{db: cfg.Db(), logger: cfg.Logger(), rm: cfg.Rm()}, nil
 }
 
 func (s *MySQLStorage) StoreAuthenticate(r *mdm.Request, msg *mdm.Authenticate) error {
@@ -104,7 +50,7 @@ UPDATE
     serial_number = new.serial_number,
     authenticate = new.authenticate,
     authenticate_at = CURRENT_TIMESTAMP;`,
-		r.ID, pemCert, nullEmptyString(msg.SerialNumber), msg.Raw,
+		r.ID, pemCert, gensql.NullEmptyString(msg.SerialNumber), msg.Raw,
 	)
 	return err
 }
@@ -146,8 +92,8 @@ UPDATE
     token_update_at = CURRENT_TIMESTAMP;`,
 		r.ID,
 		r.ParentID,
-		nullEmptyString(msg.UserShortName),
-		nullEmptyString(msg.UserLongName),
+		gensql.NullEmptyString(msg.UserShortName),
+		gensql.NullEmptyString(msg.UserLongName),
 		msg.Raw,
 	)
 	return err
@@ -190,7 +136,7 @@ UPDATE
 	enrollments.token_update_tally = enrollments.token_update_tally + 1;`,
 		r.ID,
 		deviceId,
-		nullEmptyString(userId),
+		gensql.NullEmptyString(userId),
 		r.Type.String(),
 		msg.Topic,
 		msg.PushMagic,
@@ -233,8 +179,8 @@ UPDATE
     `+colAtName+` = new.`+colAtName+`;`,
 		r.ID,
 		r.ParentID,
-		nullEmptyString(msg.UserShortName),
-		nullEmptyString(msg.UserLongName),
+		gensql.NullEmptyString(msg.UserShortName),
+		gensql.NullEmptyString(msg.UserLongName),
 		msg.Raw,
 	)
 	if err != nil {

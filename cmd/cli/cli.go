@@ -10,6 +10,7 @@ import (
 	"github.com/micromdm/nanomdm/storage"
 	"github.com/micromdm/nanomdm/storage/allmulti"
 	"github.com/micromdm/nanomdm/storage/file"
+	"github.com/micromdm/nanomdm/storage/gensql"
 	"github.com/micromdm/nanomdm/storage/mysql"
 	"github.com/micromdm/nanomdm/storage/pgsql"
 
@@ -107,37 +108,37 @@ func fileStorageConfig(dsn, options string) (*file.FileStorage, error) {
 }
 
 func mysqlStorageConfig(dsn, options string, logger log.Logger) (*mysql.MySQLStorage, error) {
-	logger = logger.With("storage", "mysql")
-	opts := []mysql.Option{
-		mysql.WithDSN(dsn),
-		mysql.WithLogger(logger),
-	}
-	if options != "" {
-		if ok, err := checkBoolOption(deleteOption, options); ok {
-			opts = append(opts, mysql.WithDeleteCommands())
-			logger.Debug("msg", "deleting commands")
-		} else if err != nil {
-			return nil, err
-		}
+	logger = logger.With("storage", gensql.MysqlDriver)
+	opts, err := generateSQLConfigs(dsn, options, logger)
+	if err != nil {
+		return nil, err
 	}
 	return mysql.New(opts...)
 }
 
 func pgsqlStorageConfig(dsn, options string, logger log.Logger) (*pgsql.PgSQLStorage, error) {
-	logger = logger.With("storage", "pgsql")
-	opts := []pgsql.Option{
-		pgsql.WithDSN(dsn),
-		pgsql.WithLogger(logger),
+	logger = logger.With("storage", gensql.PgDriver)
+	opts, err := generateSQLConfigs(dsn, options, logger)
+	if err != nil {
+		return nil, err
+	}
+	return pgsql.New(opts...)
+}
+
+func generateSQLConfigs(dsn, options string, logger log.Logger) ([]gensql.Option, error) {
+	opts := []gensql.Option{
+		gensql.WithDSN(dsn),
+		gensql.WithLogger(logger),
 	}
 	if options != "" {
 		if ok, err := checkBoolOption(deleteOption, options); ok {
-			opts = append(opts, pgsql.WithDeleteCommands())
+			opts = append(opts, gensql.WithDeleteCommands())
 			logger.Debug("msg", "deleting commands")
 		} else if err != nil {
 			return nil, err
 		}
 	}
-	return pgsql.New(opts...)
+	return opts, nil
 }
 
 type storageOption string
